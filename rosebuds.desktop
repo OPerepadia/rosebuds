@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=rosebuds
+GenericName=Earbuds Control
+Comment=Control ROSESELSA earbuds
+Exec=@EXEC@
+Icon=rosebuds
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=bluetooth;earbuds;headphones;anc;noise;battery;
