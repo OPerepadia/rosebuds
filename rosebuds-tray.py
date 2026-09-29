@@ -11,7 +11,10 @@ from functools import partial
 
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEvent, QObject, QPointF, QRectF, QSize, QStandardPaths, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    SLOT, QByteArray, QEvent, QObject, QPointF, QRectF, QSize, QStandardPaths, Qt, QTimer, Signal, Slot,
+)
+from PySide6.QtDBus import QDBusConnection
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtSvg import QSvgRenderer
@@ -470,6 +473,8 @@ class Tray(QObject):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(REFRESH_MS)
+        QDBusConnection.systemBus().connect("org.bluez", "", "org.freedesktop.DBus.Properties", "PropertiesChanged",
+                                            self, SLOT("_on_bluez_changed(QString,QVariantMap,QStringList)"))
         self.refresh()
 
     @staticmethod
@@ -502,6 +507,11 @@ class Tray(QObject):
         # The timer, the panel and the menu can overlap; one queued status read is enough.
         if not self.pending:
             self.run(lambda b: b.get_all())
+
+    @Slot(str, "QVariantMap", "QStringList")
+    def _on_bluez_changed(self, interface, changed, _invalidated):
+        if interface == "org.bluez.Device1" and "Connected" in changed:
+            self.refresh()
 
     def run(self, job):
         self.pending += 1
