@@ -35,6 +35,10 @@ Left click will open a control panel with battery levels, noise control, and oth
 
 Tested on KDE Plasma 6.
 
+<p align="center">
+  <img src="media/screenshot.png" width="350">
+</p>
+
 ## CLI
 
 In the terminal, run `rosebuds` without arguments to print current status.
