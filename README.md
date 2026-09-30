@@ -4,7 +4,7 @@ Control ROSESELSA wireless earbuds on Linux. It includes a PySide6 tray app and 
 
 Tested with **ROSE Ceramics Ultra**. Other models may work, but have not been tested.
 
-It shows the battery status and can control noise cancellation, game mode, audio codec, and a few other parameters.
+It shows the battery status and can control noise cancellation, game mode, preferred audio codec, and a few other parameters.
 
 Adding custom EQ presets, changing touch controls and some other functions are not yet implemented.
 
@@ -82,7 +82,7 @@ The checksum is the low byte of the sum of all bytes before it.
 | EQ preset | `2a` | `00` HIFI, `01` POP, `02` ROCK, `03` Classic, `04` custom |
 | Game mode | `0e` | `00` off, `01` on |
 | Dual-device connection | `32` | `00` off, `01` on. The earbuds restart to apply it |
-| Audio codec | `2b` | `00` AAC/SBC, `01` LDAC, `02` LHDC. The earbuds restart to apply it |
+| Preferred audio codec | `2b` | `00` AAC/SBC, `01` LDAC, `02` LHDC. The earbuds restart to apply it |
 | Battery (read-only) | `0c` | 3 bytes: left, right, case. Low 7 bits = percent, high bit = charging, `ff` = unknown |
 
 `custom` selects the last custom curve chosen in ROSELINK app.

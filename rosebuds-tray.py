@@ -19,7 +19,7 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPalet
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox,
+    QAbstractButton, QApplication, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox,
     QProgressBar, QPushButton, QSizePolicy, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -126,6 +126,7 @@ def stylesheet():
     QProgressBar[low="true"]::chunk {{ background: {BATTERY_LOW}; }}
     QProgressBar::chunk:disabled {{ background: {tint(0.3)}; }}
     QLabel#muted:disabled, QLabel#value:disabled {{ color: {tint(0.35)}; }}
+    QFrame#divider {{ background: {tint(0.1)}; }}
     QFrame#segmented {{ background: {tint(0.07)}; border-radius: 10px; }}
     QFrame#segmented QAbstractButton {{
         border: none; border-radius: 8px; padding: 7px 4px;
@@ -216,6 +217,27 @@ class Segmented(QFrame):
         for b in self.group.buttons():
             b.setChecked(False)
         self.group.setExclusive(True)
+
+
+class Dropdown(QComboBox):
+    """A combo box with the same interface as Segmented."""
+    picked = Signal(int)
+
+    def __init__(self, options):
+        super().__init__()
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumWidth(120)
+        for value, label in options:
+            self.addItem(label, value)
+        self.activated.connect(lambda i: self.picked.emit(self.itemData(i)))
+
+    def set_value(self, value):
+        self.setCurrentIndex(self.findData(value))
+
+    def set_allowed(self, value, allowed, tooltip):
+        i = self.findData(value)
+        self.model().item(i).setEnabled(allowed)
+        self.setItemData(i, tooltip or None, Qt.ItemDataRole.ToolTipRole)
 
 
 class BatteryGauge(QWidget):
@@ -309,36 +331,23 @@ class Panel(QWidget):
         card.addWidget(self.eq)
 
         card = self._card(root)
-        row = QHBoxLayout()
-        text = QVBoxLayout()
-        text.setSpacing(2)
-        text.addWidget(self._label("Game mode", "cardTitle"))
-        text.addWidget(self._label("Lower latency, faster sound response", "muted"))
-        row.addLayout(text, 1)
         self.game = Switch()
         self.game.clicked.connect(lambda on: tray.run(lambda b: b.set_game(on)))
-        row.addWidget(self.game)
-        card.addLayout(row)
-
-        card = self._card(root)
-        row = QHBoxLayout()
-        text = QVBoxLayout()
-        text.setSpacing(2)
-        text.addWidget(self._label("Dual-device connection", "cardTitle"))
-        note = self._label("Connect to two devices at once. Only AAC and SBC codecs work in this mode.", "muted")
-        note.setWordWrap(True)
-        text.addWidget(note)
-        row.addLayout(text, 1)
+        card.addLayout(self._setting_row("Game mode", "Lower latency, faster sound response", self.game))
+        divider = QFrame()
+        divider.setObjectName("divider")
+        divider.setFixedHeight(1)
+        card.addWidget(divider)
         self.dual = Switch()
         self.dual.clicked.connect(lambda on: tray.switch_dual(on, self))
-        row.addWidget(self.dual)
-        card.addLayout(row)
+        card.addLayout(self._setting_row(
+            "Dual-device connection",
+            "Connect to two devices at once. Only AAC and SBC codecs work in this mode.", self.dual))
 
-        card = self._card(root, "Audio codec")
-        self.codec = Segmented(CODEC_OPTIONS)
+        card = self._card(root)
+        self.codec = Dropdown(CODEC_OPTIONS)
         self.codec.picked.connect(lambda v: tray.switch_codec(v, self))
-        card.addWidget(self.codec)
-        card.addWidget(self._label("Switching audio codec will restart the earbuds.", "muted"))
+        card.addLayout(self._setting_row("Preferred audio codec", "Switching restarts the earbuds.", self.codec))
 
         self.controls = [*self.gauges, self.modes, self.levels, self.eq, self.game, self.dual, self.codec]
         self._styling = False
@@ -351,6 +360,18 @@ class Panel(QWidget):
         label = QLabel(text)
         label.setObjectName(name)
         return label
+
+    def _setting_row(self, title, note, control):
+        row = QHBoxLayout()
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        text.addWidget(self._label(title, "cardTitle"))
+        note = self._label(note, "muted")
+        note.setWordWrap(True)
+        text.addWidget(note)
+        row.addLayout(text, 1)
+        row.addWidget(control)
+        return row
 
     def _card(self, parent_layout, title=None):
         frame = QFrame()
@@ -410,10 +431,9 @@ class Panel(QWidget):
         self.codec.set_value(settings.get(r.CODEC_KEY, b"\xff")[0])
         for widget in self.controls:
             widget.setEnabled(True)
-        for value, button in ((v, self.codec.group.button(v)) for v, _ in CODEC_OPTIONS):
+        for value, _ in CODEC_OPTIONS:
             allowed = value == r.CODECS["aac"] or not dual
-            button.setEnabled(allowed)
-            button.setToolTip("" if allowed else DUAL_ONLY_AAC)
+            self.codec.set_allowed(value, allowed, "" if allowed else DUAL_ONLY_AAC)
         self.levels.setEnabled(mode == r.MODES["on"])
         self._fit_height()
 
@@ -528,7 +548,7 @@ class Tray(QObject):
         label = CODEC_LABELS[name]
         info = "" if name == "aac" else (f"{label} may cause severe stuttering. The earbuds prefer it, "
                                          "but the playing device must support it too.")
-        self._switch_restart(r.CODEC_KEY, value, "Switch audio codec",
+        self._switch_restart(r.CODEC_KEY, value, "Switch preferred audio codec",
                              f"The earbuds restart to switch to {label}. Continue?", info, parent)
 
     def _switch_restart(self, key, value, title, text, info, parent):
