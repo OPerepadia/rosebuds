@@ -1,4 +1,8 @@
-# rosebuds
+# <img src="icons/app.svg" width="32" height="32" alt=""> rosebuds
+
+![License](https://img.shields.io/github/license/OPerepadia/rosebuds)
+![Python](https://img.shields.io/badge/python-3.8+-blue)
+![Platform](https://img.shields.io/badge/platform-Linux-informational)
 
 Control ROSESELSA wireless earbuds on Linux. It includes a PySide6 tray app and a CLI tool.
 
