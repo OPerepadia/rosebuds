@@ -10,6 +10,7 @@ bin=$HOME/.local/bin
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 app=$data/rosebuds
 icons=$data/icons/hicolor/scalable/status
+app_icons=$data/icons/hicolor/scalable/apps
 autostart=${XDG_CONFIG_HOME:-$HOME/.config}/autostart/rosebuds.desktop
 menu=$data/applications/rosebuds.desktop
 
@@ -34,6 +35,7 @@ EOF
 if [ "${1:-}" = "--uninstall" ]; then
     rm -f "$bin/rosebuds" "$bin/rosebuds-tray" "$autostart" "$menu"
     for f in icons/rosebuds*.svg; do rm -f "$icons/${f##*/}"; done
+    rm -f "$app_icons/rosebuds-app.svg"
     rm -rf "$app"
     reload_icons
     echo "Removed the commands, icons, app menu entry and autostart entry."
@@ -53,6 +55,8 @@ ln -sf "$app/rosebuds-tray.py" "$bin/rosebuds-tray"
 
 mkdir -p "$icons"
 install -m 644 icons/rosebuds*.svg "$icons/"
+mkdir -p "$app_icons"
+install -m 644 icons/app.svg "$app_icons/rosebuds-app.svg"
 reload_icons
 
 # From the menu it opens the panel; at login it starts in the tray only.

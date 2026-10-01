@@ -37,7 +37,7 @@ CODEC_LABELS = {"aac": "AAC/SBC", "ldac": "LDAC", "lhdc": "LHDC"}
 CODEC_OPTIONS = [(r.CODECS[k], label) for k, label in CODEC_LABELS.items()]
 DUAL_ONLY_AAC = "Turn off dual-device connection to use this codec."
 NO_REPLY = "No reply. Is the phone app connected to the earbuds?"
-DEFAULT_NAME = "ROSE earbuds"
+DEFAULT_NAME = "rosebuds"
 UNTESTED = "Untested model. Settings may not match what you pick."
 RESTARTING = "The earbuds are restarting…"
 # The earbuds take a few seconds to restart and reconnect; check twice in case the first is too early.
@@ -101,6 +101,13 @@ def load_icon(name):
     for size in ICON_SIZES:
         icon.addPixmap(render_svg(name, color, size))
     return icon
+
+
+def load_app_icon():
+    """The colored app icon. Unlike the tray icons, it isn't recolored to the color scheme."""
+    if QIcon.hasThemeIcon("rosebuds-app"):
+        return QIcon.fromTheme("rosebuds-app")
+    return QIcon(str(ICON_DIR / "app.svg"))
 
 
 def stylesheet():
@@ -276,7 +283,7 @@ class Panel(QWidget):
         self.setObjectName("panel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setWindowTitle(DEFAULT_NAME)
-        self.setWindowIcon(load_icon("rosebuds"))
+        self.setWindowIcon(load_app_icon())
         self.setFixedWidth(460)
 
         root = QVBoxLayout(self)
@@ -588,7 +595,6 @@ class Tray(QObject):
     def _update_icons(self):
         self.icons = {True: load_icon("rosebuds"), False: load_icon("rosebuds-disconnected")}
         self.tray.setIcon(self.icons[self.connected])
-        self.panel.setWindowIcon(self.icons[True])
 
     def eventFilter(self, obj, event):
         # Redraw the icons when the desktop color scheme changes.
