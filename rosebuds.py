@@ -52,6 +52,13 @@ CODEC_KEY = 0x2B
 CODECS = {"aac": 0, "ldac": 1, "lhdc": 2}
 # Changing these restarts the earbuds, so the new value can't be read back right away.
 RESTART_KEYS = {DUAL_KEY, CODEC_KEY}
+# A2DP codec IDs, as BlueZ reports them on MediaTransport1. 0xFF means vendor-specific.
+A2DP_CODECS = {0x00: "SBC", 0x01: "MP3", 0x02: "AAC"}
+A2DP_VENDOR = 0xFF
+# Vendor-specific codecs are told apart by (vendor ID, codec ID) in the transport's Configuration.
+# Savitech's LHDC versions use several codec IDs, so match the vendor only.
+VENDOR_CODECS = {(0x012D, 0x00AA): "LDAC", (0x004F, 0x0001): "aptX", (0x00D7, 0x0024): "aptX HD"}
+VENDOR_CODEC_NAMES = {0x053A: "LHDC"}
 VERBOSE = False
 # Exact key list ROSELINK asks for when it opens.
 APP_QUERY_KEYS = bytes.fromhex(
@@ -111,6 +118,38 @@ def find_earbuds():
     if not found:
         raise EarbudsError("No paired ROSESELSA earbuds found. Pair them first, or set ROSEBUDS_ADDR.")
     return max(found, key=lambda d: d.connected)
+
+
+def codec_name(codec, configuration):
+    """Name an A2DP codec from a MediaTransport1 Codec byte and Configuration bytes."""
+    if codec != A2DP_VENDOR:
+        return A2DP_CODECS.get(codec, f"codec {codec:#04x}")
+    if len(configuration) < 6:
+        return "unknown"
+    vendor, codec_id = struct.unpack("<IH", bytes(configuration[:6]))
+    return VENDOR_CODECS.get((vendor, codec_id)) or VENDOR_CODEC_NAMES.get(vendor) or f"vendor {vendor:#06x}/{codec_id:#06x}"
+
+
+def active_codec(addr):
+    """Return the audio codec the earbuds are streaming with, or None if no A2DP link is set up.
+
+    Reads BlueZ's MediaTransport1 object for the device. It exists only while
+    A2DP is connected, so it's absent in the headset (call) profile.
+    """
+    try:
+        out = subprocess.run(
+            ["busctl", "--system", "--json=short", "call", "org.bluez", "/",
+             "org.freedesktop.DBus.ObjectManager", "GetManagedObjects"],
+            capture_output=True, text=True, timeout=5).stdout
+        objects = json.loads(out)["data"][0]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError):
+        return None
+    suffix = "/dev_" + addr.upper().replace(":", "_")
+    for path, interfaces in objects.items():
+        transport = interfaces.get("org.bluez.MediaTransport1")
+        if transport and transport["Device"]["data"].endswith(suffix):
+            return codec_name(transport["Codec"]["data"], transport["Configuration"]["data"])
+    return None
 
 
 def frame(seq, tlvs):
@@ -346,6 +385,7 @@ def battery_json(settings):
 
 def status_json(device, settings):
     data = {"device": {"name": device.alias, "address": device.addr}}
+    data["active_codec"] = active_codec(device.addr)
     for key, (label, values) in SETTING_NAMES.items():
         names = {v: k for k, v in values.items()}
         raw = settings.get(key)
@@ -357,6 +397,7 @@ def status_json(device, settings):
 def print_status(device, settings):
     rows = [("device", device.alias)]
     rows += [(label, setting_text(settings, key)) for key, (label, _) in SETTING_NAMES.items()]
+    rows.append(("active codec", active_codec(device.addr) or "none (no audio link)"))
     rows.append(("battery", battery_text(settings)))
     for label, text in rows:
         print(f"{label + ':':<15}{text}")

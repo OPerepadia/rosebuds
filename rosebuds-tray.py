@@ -420,10 +420,11 @@ class Panel(QWidget):
             widget.setEnabled(False)
         self._fit_height()
 
-    def show_settings(self, device, settings):
+    def show_settings(self, device, settings, codec):
         self.title.setText(device.alias)
         self.setWindowTitle(device.alias)
-        self.state.setText("Connected" if device.tested else f"Connected · {UNTESTED}")
+        parts = ["Connected", codec, None if device.tested else UNTESTED]
+        self.state.setText(" · ".join(p for p in parts if p))
         self.state.setProperty("ok", True)
         repolish(self.state)
         for gauge, (_, pct, charging) in zip(self.gauges, r.battery_levels(settings)):
@@ -446,7 +447,7 @@ class Panel(QWidget):
 
 
 class Tray(QObject):
-    # Emitted from the worker thread: (Device, settings dict), or an error message.
+    # Emitted from the worker thread: (Device, settings dict, active codec or None), or an error message.
     result = Signal(object)
 
     def __init__(self):
@@ -464,6 +465,8 @@ class Tray(QObject):
         self.title.setEnabled(False)
         self.status = self.menu.addAction("Connecting…")
         self.status.setEnabled(False)
+        self.codec_status = self.menu.addAction("Codec: none")
+        self.codec_status.setEnabled(False)
 
         self.menu.addSeparator()
         self.modes = self._radio_group(self.menu, MODE_OPTIONS, lambda v: self.run(lambda b: b.set_mode(v)))
@@ -537,7 +540,9 @@ class Tray(QObject):
 
     @Slot(str, "QVariantMap", "QStringList")
     def _on_bluez_changed(self, interface, changed, _invalidated):
-        if interface == "org.bluez.Device1" and "Connected" in changed:
+        # A transport's state changes when audio starts or stops, so its codec is known by then.
+        if (interface == "org.bluez.Device1" and "Connected" in changed
+                or interface == "org.bluez.MediaTransport1" and "State" in changed):
             self.refresh()
 
     def run(self, job):
@@ -584,7 +589,10 @@ class Tray(QObject):
             buds = r.Earbuds()
             try:
                 result = job(buds)
-                self.result.emit(result if isinstance(result, str) else (buds.device, result))
+                if isinstance(result, str):
+                    self.result.emit(result)
+                else:
+                    self.result.emit((buds.device, result, r.active_codec(buds.device.addr)))
             finally:
                 buds.close()
         except r.EarbudsError as e:
@@ -608,10 +616,11 @@ class Tray(QObject):
 
     def _show(self, result):
         self.pending -= 1
-        device, settings = (None, None) if isinstance(result, str) else result
+        device, settings, codec = (None, None, None) if isinstance(result, str) else result
         if not settings:
             message = result if isinstance(result, str) else NO_REPLY
             self.status.setText("Not available")
+            self.codec_status.setText("Codec: none")
             self._set_connected(False)
             self.tray.setToolTip(f"{self.name}\n{message}")
             for action in self.controls:
@@ -623,6 +632,7 @@ class Tray(QObject):
         self.title.setText(self.name)
         text = battery_text(settings)
         self.status.setText(text)
+        self.codec_status.setText(f"Codec: {codec}" if codec else "Codec: none")
         self._set_connected(True)
         self.tray.setToolTip(f"{self.name}\n{text}" + ("" if device.tested else f"\n{UNTESTED}"))
         for action in self.controls:
@@ -637,7 +647,7 @@ class Tray(QObject):
             menu.setTitle(f"{title}: {current}" if current else title)
         self.game.setChecked(settings.get(r.GAME_KEY) == b"\x01")
         self.settings = settings
-        self.panel.show_settings(device, settings)
+        self.panel.show_settings(device, settings, codec)
 
 
 def main():

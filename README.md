@@ -17,6 +17,7 @@ Adding custom EQ presets, changing touch controls and some other functions are n
 - Python 3.
 - PySide6 for the GUI. The CLI has no third-party Python dependencies.
 - Earbuds paired and connected to the Linux host.
+- `busctl` (systemd) to show the active audio codec.
 
 ## Installation
 
@@ -46,6 +47,7 @@ Tested on KDE Plasma 6.
 ## CLI
 
 In the terminal, run `rosebuds` without arguments to print current status.
+The `active codec` line is what the earbuds are streaming with right now. It is read from BlueZ and can differ from the preferred codec.
 
 To list available commands, run `rosebuds -h`.
 
