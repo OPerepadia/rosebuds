@@ -6,6 +6,7 @@ Start with --show to open the panel right away.
 """
 import signal
 import sys
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
@@ -15,7 +16,7 @@ from PySide6.QtCore import (
     SLOT, QByteArray, QEvent, QObject, QPointF, QRectF, QSize, QStandardPaths, Qt, QTimer, Signal, Slot,
 )
 from PySide6.QtDBus import QDBusConnection
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -27,7 +28,7 @@ import rosebuds as r
 
 REFRESH_MS = 60_000
 # Same order as the ROSELINK app.
-MODE_LABELS = {"on": "ANC", "wind": "Wind", "off": "Off", "trans": "Transparency"}
+MODE_LABELS = {"on": "ANC", "wind": "Wind", "off": "Normal", "trans": "Transparency"}
 LEVEL_LABELS = {"light": "Light", "moderate": "Moderate", "deep": "Deep"}
 MODE_OPTIONS = [(r.MODES[k], label) for k, label in MODE_LABELS.items()]
 LEVEL_OPTIONS = [(r.LEVELS[k], label) for k, label in LEVEL_LABELS.items()]
@@ -128,6 +129,7 @@ def stylesheet():
     QLabel#cardTitle, QLabel#value {{ font-weight: 600; }}
     QLabel#muted, QLabel#state {{ color: {tint(0.6)}; }}
     QLabel#state[ok="true"] {{ color: {color(QPalette.ColorRole.Highlight)}; }}
+    QLabel#state[error="true"] {{ color: {BATTERY_LOW}; }}
     QProgressBar {{ background: {tint(0.12)}; border: none; border-radius: 3px; }}
     QProgressBar::chunk {{ background: {BATTERY_OK}; border-radius: 3px; }}
     QProgressBar[low="true"]::chunk {{ background: {BATTERY_LOW}; }}
@@ -285,6 +287,7 @@ class Panel(QWidget):
         self.setWindowTitle(DEFAULT_NAME)
         self.setWindowIcon(load_app_icon())
         self.setFixedWidth(460)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.hide)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -297,16 +300,31 @@ class Panel(QWidget):
         self.title.setObjectName("title")
         self.state = QLabel("Connecting…")
         self.state.setObjectName("state")
+        self._status, self._ok, self._error, self._applying = "Connecting…", False, False, False
         self.state.setWordWrap(True)
         titles.addWidget(self.title)
         titles.addWidget(self.state)
+        self.warning = QWidget()
+        warning = QHBoxLayout(self.warning)
+        warning.setContentsMargins(0, 2, 0, 0)
+        warning.setSpacing(6)
+        icon = QLabel()
+        icon.setPixmap(QIcon.fromTheme("dialog-warning").pixmap(16, 16))
+        icon.setContentsMargins(0, 2, 0, 0)
+        text = QLabel(UNTESTED)
+        text.setObjectName("muted")
+        text.setWordWrap(True)
+        warning.addWidget(icon, 0, Qt.AlignmentFlag.AlignTop)
+        warning.addWidget(text, 1)
+        self.warning.hide()
+        titles.addWidget(self.warning)
         header.addLayout(titles, 1)
-        refresh = QToolButton()
-        refresh.setIcon(QIcon.fromTheme("view-refresh"))
-        refresh.setToolTip("Refresh")
-        refresh.setAutoRaise(True)
-        refresh.clicked.connect(tray.refresh)
-        header.addWidget(refresh, 0, Qt.AlignmentFlag.AlignTop)
+        self.refresh_button = QToolButton()
+        self.refresh_button.setIcon(QIcon.fromTheme("view-refresh"))
+        self.refresh_button.setToolTip("Refresh")
+        self.refresh_button.setAutoRaise(True)
+        self.refresh_button.clicked.connect(tray.refresh)
+        header.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
 
         card = self._card(root)
@@ -324,12 +342,13 @@ class Panel(QWidget):
         self.modes.picked.connect(lambda v: tray.run(lambda b: b.set_mode(v)))
         card.addWidget(self.modes)
         card.addSpacing(4)
-        card.addWidget(self._label("ANC level", "muted"))
+        self.levels_label = self._label("ANC level", "muted")
+        card.addWidget(self.levels_label)
         self.levels = Segmented(LEVEL_OPTIONS)
         self.levels.picked.connect(lambda v: tray.run(lambda b: b.set_level(v)))
         card.addWidget(self.levels)
         # The level only matters in ANC mode, so follow the mode selection right away.
-        self.modes.picked.connect(lambda v: self.levels.setEnabled(v == r.MODES["on"]))
+        self.modes.picked.connect(lambda v: self._set_levels_enabled(v == r.MODES["on"]))
 
         card = self._card(root, "Equalizer")
         self.eq = Segmented(EQ_OPTIONS)
@@ -350,8 +369,10 @@ class Panel(QWidget):
         card.addLayout(self._setting_row(
             "Dual-device connection",
             "Connect to two devices at once. Only AAC and SBC codecs work in this mode.", self.dual))
-
-        card = self._card(root)
+        divider = QFrame()
+        divider.setObjectName("divider")
+        divider.setFixedHeight(1)
+        card.addWidget(divider)
         self.codec = Dropdown(CODEC_OPTIONS)
         self.codec.picked.connect(lambda v: tray.switch_codec(v, self))
         card.addLayout(self._setting_row("Preferred audio codec", "Switching restarts the earbuds.", self.codec))
@@ -367,6 +388,12 @@ class Panel(QWidget):
         label = QLabel(text)
         label.setObjectName(name)
         return label
+
+    def _set_levels_enabled(self, enabled):
+        self.levels.setEnabled(enabled)
+        tip = "" if enabled else "Only available in ANC mode"
+        self.levels.setToolTip(tip)
+        self.levels_label.setToolTip(tip)
 
     def _setting_row(self, title, note, control):
         row = QHBoxLayout()
@@ -412,10 +439,28 @@ class Panel(QWidget):
         event.ignore()
         self.hide()
 
-    def show_error(self, message):
-        self.state.setText(message)
-        self.state.setProperty("ok", False)
+    def _set_status(self, text, ok, error=False):
+        self._status, self._ok, self._error = text, ok, error
+        self._render_status()
+
+    def _render_status(self):
+        self.state.setText("Applying…" if self._applying else self._status)
+        self.state.setProperty("ok", self._ok and not self._applying)
+        self.state.setProperty("error", self._error and not self._applying)
         repolish(self.state)
+
+    def set_busy(self, busy, applying):
+        """Disable refresh while the earbuds are read. Show "Applying…" while a change is sent."""
+        self.refresh_button.setEnabled(not busy)
+        if applying != self._applying:
+            self._applying = applying
+            self._render_status()
+            self._fit_height()
+
+    def show_unavailable(self, message):
+        # A restart is expected, so it isn't styled as an error.
+        self._set_status(message, False, error=message != RESTARTING)
+        self.warning.hide()
         for widget in self.controls:
             widget.setEnabled(False)
         self._fit_height()
@@ -423,10 +468,8 @@ class Panel(QWidget):
     def show_settings(self, device, settings, codec):
         self.title.setText(device.alias)
         self.setWindowTitle(device.alias)
-        parts = ["Connected", codec, None if device.tested else UNTESTED]
-        self.state.setText(" · ".join(p for p in parts if p))
-        self.state.setProperty("ok", True)
-        repolish(self.state)
+        self._set_status(f"Connected · {codec}" if codec else "Connected", True)
+        self.warning.setVisible(not device.tested)
         for gauge, (_, pct, charging) in zip(self.gauges, r.battery_levels(settings)):
             gauge.set_level(pct, charging)
         mode = settings.get(r.MODE_KEY, b"\xff")[0]
@@ -442,7 +485,7 @@ class Panel(QWidget):
         for value, _ in CODEC_OPTIONS:
             allowed = value == r.CODECS["aac"] or not dual
             self.codec.set_allowed(value, allowed, "" if allowed else DUAL_ONLY_AAC)
-        self.levels.setEnabled(mode == r.MODES["on"])
+        self._set_levels_enabled(mode == r.MODES["on"])
         self._fit_height()
 
 
@@ -454,7 +497,8 @@ class Tray(QObject):
         super().__init__()
         # One worker, so only one connection to the earbuds is open at a time.
         self.pool = ThreadPoolExecutor(max_workers=1)
-        self.pending = 0
+        # One entry per queued job, in order: True if it changes a setting.
+        self.queue = deque()
         self.settings = {}
         self.result.connect(self._show)
         self.panel = Panel(self)
@@ -535,8 +579,8 @@ class Tray(QObject):
 
     def refresh(self):
         # The timer, the panel and the menu can overlap; one queued status read is enough.
-        if not self.pending:
-            self.run(lambda b: b.get_all())
+        if not self.queue:
+            self.run(lambda b: b.get_all(), applying=False)
 
     @Slot(str, "QVariantMap", "QStringList")
     def _on_bluez_changed(self, interface, changed, _invalidated):
@@ -545,8 +589,9 @@ class Tray(QObject):
                 or interface == "org.bluez.MediaTransport1" and "State" in changed):
             self.refresh()
 
-    def run(self, job):
-        self.pending += 1
+    def run(self, job, applying=True):
+        self.queue.append(applying)
+        self.panel.set_busy(True, any(self.queue))
         self.pool.submit(self._work, job)
 
     def switch_dual(self, on, parent):
@@ -615,7 +660,8 @@ class Tray(QObject):
         self.tray.setIcon(self.icons[connected])
 
     def _show(self, result):
-        self.pending -= 1
+        self.queue.popleft()
+        self.panel.set_busy(bool(self.queue), any(self.queue))
         device, settings, codec = (None, None, None) if isinstance(result, str) else result
         if not settings:
             message = result if isinstance(result, str) else NO_REPLY
@@ -625,7 +671,7 @@ class Tray(QObject):
             self.tray.setToolTip(f"{self.name}\n{message}")
             for action in self.controls:
                 action.setEnabled(False)
-            self.panel.show_error(message)
+            self.panel.show_unavailable(message)
             return
 
         self.name = device.alias

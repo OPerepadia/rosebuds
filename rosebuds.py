@@ -329,7 +329,7 @@ SETTING_NAMES = {
 }
 COMMANDS = {"anc": MODE_KEY, "anc-level": LEVEL_KEY, "eq": EQ_KEY, "game": GAME_KEY,
             "dual": DUAL_KEY, "codec": CODEC_KEY}
-VALUE_ALIASES = {"transparency": "trans", "sbc": "aac"}
+VALUE_ALIASES = {MODE_KEY: {"transparency": "trans", "normal": "off"}, CODEC_KEY: {"sbc": "aac"}}
 
 
 def usage_error(message):
@@ -355,7 +355,7 @@ def parse_command(args):
         if len(rest) > 1:
             usage_error(f"'{cmd}' takes one value.")
         values = SETTING_NAMES[key][1]
-        name = VALUE_ALIASES.get(rest[0], rest[0])
+        name = VALUE_ALIASES.get(key, {}).get(rest[0], rest[0])
         if name not in values:
             usage_error(f"Unknown {cmd} value '{rest[0]}'. Choose from: {', '.join(values)}.")
         return "set", key, values[name]
