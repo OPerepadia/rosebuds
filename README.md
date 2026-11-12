@@ -36,6 +36,8 @@ Or run the scripts directly without installing: `./rosebuds.py` for CLI or `./ro
 
 Right click the earbuds icon in the system tray for a quick access to main controls.
 
+A bar under the icon shows the battery level of the earbud with the lower charge.
+
 Left click will open a control panel with battery levels, noise control, and other settings.
 
 Tested on KDE Plasma 6.

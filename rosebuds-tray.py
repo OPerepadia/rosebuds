@@ -46,6 +46,8 @@ RESTART_CHECKS_MS = (8_000, 20_000)
 # Breeze's positive and negative colors.
 BATTERY_OK = "#27ae60"
 BATTERY_LOW = "#da4453"
+# Breeze's focus color.
+BATTERY_CHARGING = "#3daee9"
 
 ICON_DIR = Path(__file__).resolve().parent / "icons"
 ICON_SIZES = (16, 22, 24, 32, 48, 64)
@@ -71,6 +73,37 @@ def render_svg(name, color, size, opacity=1.0):
     renderer.render(p, QRectF(0, 0, size, size))
     p.end()
     return pixmap
+
+
+def lowest_bud(settings):
+    """Return (percent, charging) of the earbud with the lower charge, or None if unknown."""
+    buds = [(pct, charging) for name, pct, charging in r.battery_levels(settings)
+            if name != "case" and pct is not None]
+    return min(buds, default=None)
+
+
+def tray_icon(name, color, battery):
+    """The tray icon with a battery bar in the free strip under the earbuds."""
+    icon = QIcon()
+    for size in ICON_SIZES:
+        pixmap = render_svg(name, color, size)
+        if battery:
+            pct, charging = battery
+            k = size / 24
+            track = QRectF(3 * k, 21 * k, 18 * k, 2.6 * k)
+            fill = QColor(BATTERY_CHARGING if charging else BATTERY_LOW if pct <= 20 else BATTERY_OK)
+            p = QPainter(pixmap)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setOpacity(0.25)
+            p.setBrush(QColor(color))
+            p.drawRoundedRect(track, k, k)
+            p.setOpacity(1.0)
+            p.setBrush(fill)
+            p.drawRoundedRect(QRectF(track.x(), track.y(), track.width() * pct / 100, track.height()), k, k)
+            p.end()
+        icon.addPixmap(pixmap)
+    return icon
 
 
 def button_icon(name):
@@ -534,6 +567,7 @@ class Tray(QObject):
                          self.eq_menu.menuAction(), self.game]
 
         self.connected = False
+        self.battery = None
         self.icons = {}
         self.tray = QSystemTrayIcon()
         self._update_icons()
@@ -647,7 +681,7 @@ class Tray(QObject):
 
     def _update_icons(self):
         self.icons = {True: load_icon("rosebuds"), False: load_icon("rosebuds-disconnected")}
-        self.tray.setIcon(self.icons[self.connected])
+        self._set_connected(self.connected)
 
     def eventFilter(self, obj, event):
         # Redraw the icons when the desktop color scheme changes.
@@ -657,7 +691,12 @@ class Tray(QObject):
 
     def _set_connected(self, connected):
         self.connected = connected
-        self.tray.setIcon(self.icons[connected])
+        if connected and self.battery:
+            # Drawn here, so it takes the text color instead of being recolored by Plasma.
+            color = QApplication.palette().color(QPalette.ColorRole.WindowText).name()
+            self.tray.setIcon(tray_icon("rosebuds", color, self.battery))
+        else:
+            self.tray.setIcon(self.icons[connected])
 
     def _show(self, result):
         self.queue.popleft()
@@ -667,6 +706,7 @@ class Tray(QObject):
             message = result if isinstance(result, str) else NO_REPLY
             self.status.setText("Not available")
             self.codec_status.setText("Codec: none")
+            self.battery = None
             self._set_connected(False)
             self.tray.setToolTip(f"{self.name}\n{message}")
             for action in self.controls:
@@ -679,6 +719,7 @@ class Tray(QObject):
         text = battery_text(settings)
         self.status.setText(text)
         self.codec_status.setText(f"Codec: {codec}" if codec else "Codec: none")
+        self.battery = lowest_bud(settings)
         self._set_connected(True)
         self.tray.setToolTip(f"{self.name}\n{text}" + ("" if device.tested else f"\n{UNTESTED}"))
         for action in self.controls:
