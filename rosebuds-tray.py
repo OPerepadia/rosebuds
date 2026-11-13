@@ -43,8 +43,9 @@ UNTESTED = "Untested model. Settings may not match what you pick."
 RESTARTING = "The earbuds are restarting…"
 # The earbuds take a few seconds to restart and reconnect; check twice in case the first is too early.
 RESTART_CHECKS_MS = (8_000, 20_000)
-# Breeze's positive and negative colors.
+# Breeze's positive and negative colors, plus a yellow in between.
 BATTERY_OK = "#27ae60"
+BATTERY_MEDIUM = "#f5c211"
 BATTERY_LOW = "#da4453"
 # Breeze's focus color.
 BATTERY_CHARGING = "#3daee9"
@@ -53,6 +54,14 @@ ICON_DIR = Path(__file__).resolve().parent / "icons"
 ICON_SIZES = (16, 22, 24, 32, 48, 64)
 # The color the SVGs use for ColorScheme-Text; Plasma replaces it when it loads them.
 ICON_BASE_COLOR = "#232629"
+
+
+def battery_color(pct, charging):
+    if charging:
+        return BATTERY_CHARGING
+    if pct <= 20:
+        return BATTERY_LOW
+    return BATTERY_MEDIUM if pct < 40 else BATTERY_OK
 
 
 def battery_text(settings):
@@ -91,7 +100,7 @@ def tray_icon(name, color, battery):
             pct, charging = battery
             k = size / 24
             track = QRectF(3 * k, 21 * k, 18 * k, 2.6 * k)
-            fill = QColor(BATTERY_CHARGING if charging else BATTERY_LOW if pct <= 20 else BATTERY_OK)
+            fill = QColor(battery_color(pct, charging))
             p = QPainter(pixmap)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setPen(Qt.PenStyle.NoPen)
@@ -165,6 +174,7 @@ def stylesheet():
     QLabel#state[error="true"] {{ color: {BATTERY_LOW}; }}
     QProgressBar {{ background: {tint(0.12)}; border: none; border-radius: 3px; }}
     QProgressBar::chunk {{ background: {BATTERY_OK}; border-radius: 3px; }}
+    QProgressBar[medium="true"]::chunk {{ background: {BATTERY_MEDIUM}; }}
     QProgressBar[low="true"]::chunk {{ background: {BATTERY_LOW}; }}
     QProgressBar::chunk:disabled {{ background: {tint(0.3)}; }}
     QLabel#muted:disabled, QLabel#value:disabled {{ color: {tint(0.35)}; }}
@@ -306,7 +316,9 @@ class BatteryGauge(QWidget):
     def set_level(self, pct, charging):
         self.bar.setValue(pct or 0)
         self.value.setText("–" if pct is None else f"{pct}%" + (" ⚡" if charging else ""))
-        self.bar.setProperty("low", pct is not None and pct <= 20 and not charging)
+        known = pct is not None and not charging
+        self.bar.setProperty("low", known and pct <= 20)
+        self.bar.setProperty("medium", known and 20 < pct < 40)
         repolish(self.bar)
 
 
